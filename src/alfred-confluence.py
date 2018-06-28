@@ -19,7 +19,7 @@ def getConfluenceBaseUrl():
     if wf.settings.get(PROP_BASEURL):
         return wf.settings[PROP_BASEURL]
     else:
-        wf.add_item(title='No Confluence Base URL set.', 
+        wf.add_item(title='No Confluence Base URL set.',
             subtitle='Type confluence_baseurl <baseUrl> and hit enter.',
             valid=False
             )
@@ -32,7 +32,7 @@ def getConfluenceUsername():
         return wf.settings[PROP_USERNAME]
     else:
         wf.add_item(
-            title='No Confluence Username set. Please run confluence_username', 
+            title='No Confluence Username set. Please run confluence_username',
             subtitle='Type confluence_username <username> and hit enter.',
             valid=False
             )
@@ -45,7 +45,7 @@ def getConfluencePassword():
         return wf.get_password(PROP_PASSWORD)
     except PasswordNotFound:
         wf.add_item(
-            title='No Confluence Password set. Please run confluence_password', 
+            title='No Confluence Password set. Please run confluence_password',
             subtitle='Type confluence_password <password> and hit enter.',
             valid=False
             )
@@ -72,7 +72,7 @@ def main(wf):
 
     if args.password:
         wf.save_password(PROP_PASSWORD, args.password)
-        return 0  
+        return 0
 
     try:
         # lookup config for system
@@ -94,11 +94,14 @@ def main(wf):
             )
 
     # query Confluence
-    url = config['baseUrl'] + '/rest/quicknav/1/search?os_authType=basic&query=%s' % query
-    
+    url = config['baseUrl'] + "/rest/api/search"
+
     log.debug('Quick Search URL: ' + url)
 
-    r = web.get(url, params=dict(query=query), auth=(config['username'], config['password']))
+    if config['type'] == 'title':
+        r = web.get(url, params=dict(cql="space="+config['space']+" and type=page and title~\"*"+query+"*\" order by lastModified desc"), headers=dict(Accept='application/json', authorization="Basic " + (config['username'] + ":" + config['password']).encode("base64")[:-1]))
+    else:
+        r = web.get(url, params=dict(cql="space="+config['space']+" and type=page and siteSearch~\""+query+"\" order by lastModified desc"), headers=dict(Accept='application/json', authorization="Basic " + (config['username'] + ":" + config['password']).encode("base64")[:-1]))
 
     # throw an error if request failed
     # Workflow will catch this and show it to the user
@@ -106,41 +109,33 @@ def main(wf):
 
     # Parse the JSON returned by pinboard and extract the posts
     result = r.json()
-    contentGroups = result['contentNameMatches']
+    contentGroups = result['results']
 
     # Loop through the returned posts and add an item for each to
     # the list of results for Alfred
-    for contentGroup in contentGroups:
-        for content in contentGroup:
-            # filter results to only contain pages and blog posts (and search site link)
-            if content['className'] in ['content-type-page', 'content-type-blogpost', 'search-for']:
-                if (content.get('spaceName')):
-                    subtitle = content['spaceName']
-                else:
-                    subtitle = 'Use full Confluence Search'
-                    
 
-                wf.add_item(title=htmlParser.unescape(content['name']), 
-                    subtitle=config['prefix'] + subtitle,
-                    arg=getBaseUrlWithoutPath(config['baseUrl']) + content['href'],
-                    valid=True,
-                    icon='assets/' + content['className'] + '.png')
+    for content in contentGroups:
+        wf.add_item(title=htmlParser.unescape(content['title']),
+            arg=getBaseUrlWithoutPath(config['baseUrl']) + "/wiki"+ content['url'],
+            subtitle=htmlParser.unescape(content['excerpt']),
+            valid=True,
+            icon='assets/content-type-page.png')
 
     # Send the results to Alfred as XML
     wf.send_feedback()
 
 
-def findConfig(args): 
+def findConfig(args):
     homeDir = expanduser('~')
-    with open(homeDir + '/.alfred-confluence.json') as configFile:    
+    with open(homeDir + '/.alfred-confluence.json') as configFile:
         configs = json.load(configFile)
 
-    
+
     if len(args) > 1:
         for config in configs:
             if args[0].lower() == config['key'].lower():
                 return config
-    
+
     # Fallback to first entry
     configs[0]['isFallback'] = True
     return configs[0]
@@ -163,7 +158,7 @@ if __name__ == u'__main__':
     if wf.update_available:
         # Add a notification to top of Script Filter results
         wf.add_item('New version of the Alfred Confluence workflow available',
-                    'Hit enter to to install the update.',
+                    'Hit enter twice to to install the update.',
                     autocomplete='workflow:update',
                     icon=ICON_INFO)
 
